@@ -1,0 +1,50 @@
+**Rules for Anomaly Human Activities:**
+1. Running or jumping
+2. Any non-walking movement such as riding a bicycle or scooter, skateboarding
+3. Moving with usual speed such as very fast or in hurry
+4. Person lying or bending down on the ground
+5. Aggressive or unusual movements such as fighting or pushing
+6. Loitering around trash bin
+7. Climbing on trees or into manhole/utility access points
+8. Tampering with manhole covers
+9. Engaging in physical altercation
+10. Lingering without a clear purpose near a sensitive area
+11. Falling unexpectedly
+
+**Rules for Anomaly Environmental Objects:**
+1. Missing, removed, or ajar manhole covers
+2. Ground transportations such as vehicles, vans, bicycles.
+3. Unattended objects (security threat)
+4. Unusual objects (vehicles, large unattended luggage, etc.)
+5. Damaged manhole cover or trees
+6. Abandoned items in a public area
+7. Yellow objects (when not commonly seen)
+8. Graffiti on building windows or vandalism to a fence
+9. Obstructions on pedestrian crossing
+10. Fire hydrant spraying water without presence of emergency services
+11. Unidentified objects near the tall structure
+12. Smoke or fire coming from a utility access point
+13. Objects thrown or falling from a height
+
+**Rules for Normal Human Activities:**
+1. Walking alone or with another person
+2. Standing and using a mobile device
+3. Walking on the sidewalk
+4. Walking towards or away from a building
+5. Entering a building
+6. Standing near a trash bin
+7. Waiting at traffic lights
+8. Walking on pedestrian crossing
+9. Sitting on bench or ground
+
+**Rules for Normal Environmental Objects:**
+1. Manhole covers on the ground or street
+2. Trees along the street or Plants present
+3. Trash bin in vicinity or placed beside the street
+4. Posters or signs on glass door
+5. Static building with glass windows
+6. Fence along the water
+7. Pedestrian crossing markings visible
+8. Standing fire hydrant
+9. Static tall structure in the background
+10. Utility access points on the ground
