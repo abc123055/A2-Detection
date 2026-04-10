@@ -36,7 +36,8 @@ dependencies:
       - nvidia-nvjitlink-cu12==12.9.86
       - nvidia-nvtx-cu12==12.1.105
 
-      # ── Hugging Face / Transformers ──
+      # ── ModelScope / Transformers ──
+      - modelscope>=1.11.0
       - transformers==4.35.0
       - tokenizers==0.14.1
       - accelerate==0.24.1

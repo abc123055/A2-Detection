@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import Dataset
-from transformers import CLIPProcessor, CLIPModel
+from modelscope import CLIPProcessor, CLIPModel
 # from utils import *
 import random
 import torch

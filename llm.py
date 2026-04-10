@@ -1,5 +1,5 @@
 # Load model directly
-from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
+from modelscope import AutoTokenizer, AutoModelForCausalLM
 import torch
 from utils import *
 from collections import Counter

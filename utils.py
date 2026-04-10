@@ -9,9 +9,9 @@ import re
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
 import torch
 
-from transformers import pipeline
+from modelscope.pipelines import pipeline as ms_pipeline
 device = 0 if torch.cuda.is_available() else -1
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", device = 0)
+classifier = ms_pipeline("zero-shot-classification", model="AI-ModelScope/bart-large-mnli", device = 0)
 
 np.random.seed(2024)
 

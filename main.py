@@ -2,7 +2,7 @@ from llm import *
 from utils import *
 # from image2text import cogvlm
 import argparse
-from accelerate import init_empty_weights, infer_auto_device_map, load_checkpoint_and_dispatch
+from modelscope import AutoModelForCausalLM, AutoTokenizer
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -28,7 +28,7 @@ def main():
     if args.induct:
 
         cog_model = AutoModelForCausalLM.from_pretrained(
-            'THUDM/cogvlm-chat-hf',
+            'ZhipuAI/cogvlm-chat',
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
             # device_map='auto',
@@ -59,7 +59,7 @@ def main():
 
     if args.deduct:
         ## Deduction
-        model_id = "mistralai/Mistral-7B-Instruct-v0.2"
+        model_id = "AI-ModelScope/Mistral-7B-Instruct-v0.2"
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         llm_model = AutoModelForCausalLM.from_pretrained(model_id, low_cpu_mem_usage=True, torch_dtype=torch.float16,
                                                      device_map='auto').eval()

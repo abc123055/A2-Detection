@@ -2,7 +2,7 @@ from utils import *
 import torch
 import os
 from openai import OpenAI
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from modelscope import AutoTokenizer, AutoModelForCausalLM
 np.random.seed(2024)
 torch.manual_seed(2024)
 
