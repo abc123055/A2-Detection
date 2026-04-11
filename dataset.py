@@ -12,10 +12,203 @@ import cv2
 import os
 import os
 import shutil
+from glob import glob
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 for i in range(torch.cuda.device_count()):
     print(f"Device {i}: {torch.cuda.get_device_name(i)}")
+
+
+class DatasetBuilder:
+    """
+    为 AnomalyRuler 构建新数据集的工具类。
+    负责：视频抽帧、创建目录结构、生成 CSV 索引文件。
+
+    使用示例（在项目根目录下运行 Python）：
+    -------------------------------------------------------
+    from dataset import DatasetBuilder
+
+    builder = DatasetBuilder('Mydataset')
+
+    # 第 1 步：查看目录结构（此时是空的）
+    builder.show_structure()
+
+    # 第 2 步：从视频抽帧到 train/（正常帧，用于规则归纳参考）
+    builder.extract_frames(
+        video_paths=['/path/to/normal_video.mp4'],
+        target='train',           # 放入 train/ 目录
+        sample_interval=30,       # 每 30 帧取 1 帧
+    )
+
+    # 第 3 步：从视频抽帧到 test/（测试帧）
+    builder.extract_frames(
+        video_paths=['/path/to/test_video1.mp4', '/path/to/test_video2.mp4'],
+        target='test',
+        sample_interval=30,
+    )
+
+    # 第 4 步：生成 train.csv（所有 train/ 下的帧，label=0）
+    builder.create_train_csv()
+
+    # 第 5 步：生成 test_frame/*.csv（每个视频一个 CSV）
+    #   video_labels: 视频级标签，1=异常视频，0=正常视频
+    #   当 video_labels=1 时，所有帧标记为 1
+    builder.create_test_csvs(video_labels={'test_video1': 1, 'test_video2': 1})
+
+    # 第 6 步：再次查看目录结构，确认一切就绪
+    builder.show_structure()
+    -------------------------------------------------------
+    """
+
+    def __init__(self, data_name):
+        """
+        初始化 DatasetBuilder。
+
+        :param data_name: 数据集名称，会在项目根目录下创建同名文件夹
+        """
+        self.data_name = data_name
+        self.root = data_name  # 相对于项目根目录
+        # 创建所需的子目录
+        for sub in ['train', 'test_frame', 'test_frame_description',
+                     'modified_test_frame_description']:
+            os.makedirs(os.path.join(self.root, sub), exist_ok=True)
+        print(f"[DatasetBuilder] 数据集根目录: {os.path.abspath(self.root)}")
+
+    def extract_frames(self, video_paths, target='test', sample_interval=1):
+        """
+        从视频文件中抽帧，保存为 JPG 图片。
+
+        :param video_paths: 视频文件路径列表
+        :param target: 'train' 或 'test'，决定帧保存到哪个目录
+        :param sample_interval: 采样间隔，1=每帧都取，30=每30帧取1帧
+        """
+        for vpath in video_paths:
+            if not os.path.isfile(vpath):
+                print(f"  [跳过] 文件不存在: {vpath}")
+                continue
+
+            video_name = os.path.splitext(os.path.basename(vpath))[0]
+            if target == 'train':
+                out_dir = os.path.join(self.root, 'train', video_name)
+            else:
+                # test 帧也放在 train/ 同级的结构中方便管理
+                # 但路径会记录在 test_frame/*.csv 中
+                out_dir = os.path.join(self.root, 'test', video_name)
+
+            os.makedirs(out_dir, exist_ok=True)
+
+            cap = cv2.VideoCapture(vpath)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            saved = 0
+            frame_idx = 0
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                if frame_idx % sample_interval == 0:
+                    fname = f"frame_{frame_idx:06d}.jpg"
+                    cv2.imwrite(os.path.join(out_dir, fname), frame)
+                    saved += 1
+                frame_idx += 1
+
+            cap.release()
+            print(f"  [完成] {video_name}: 总帧数={total}, fps={fps:.1f}, "
+                  f"采样间隔={sample_interval}, 保存了 {saved} 帧 → {out_dir}")
+
+    def create_train_csv(self):
+        """
+        扫描 train/ 目录下所有图片，生成 train.csv（label 全为 0）。
+        """
+        train_dir = os.path.join(self.root, 'train')
+        file_paths = sorted(glob(os.path.join(train_dir, '**', '*.jpg'), recursive=True))
+        if not file_paths:
+            print(f"  [警告] {train_dir} 下没有找到 jpg 文件")
+            return
+
+        df = pd.DataFrame({'image_path': file_paths, 'label': [0] * len(file_paths)})
+        csv_path = os.path.join(self.root, 'train.csv')
+        df.to_csv(csv_path, index=False)
+        print(f"  [完成] 生成 {csv_path}，共 {len(df)} 条记录（全部 label=0）")
+
+    def create_test_csvs(self, normal_names=None, anomaly_names=None):
+        """
+        为 test/ 下的每个视频目录生成 test_frame/{video_name}.csv。
+
+        :param normal_names: set，正常测试视频名集合 → label=0
+        :param anomaly_names: set，异常测试视频名集合 → label=1
+                              未在任何集合中的视频默认 label=1
+        """
+        normal_names = normal_names or set()
+        anomaly_names = anomaly_names or set()
+
+        test_dir = os.path.join(self.root, 'test')
+        if not os.path.isdir(test_dir):
+            print(f"  [错误] 目录不存在: {test_dir}，请先运行 extract_frames(target='test')")
+            return
+
+        video_dirs = sorted([d for d in os.listdir(test_dir)
+                             if os.path.isdir(os.path.join(test_dir, d))])
+        if not video_dirs:
+            print(f"  [警告] {test_dir} 下没有视频目录，请先运行 extract_frames(target='test')")
+            return
+
+        for vname in video_dirs:
+            vdir = os.path.join(test_dir, vname)
+            frames = sorted(glob(os.path.join(vdir, '*.jpg')))
+            if not frames:
+                print(f"  [跳过] {vname}: 没有帧图片")
+                continue
+
+            label = 0 if vname in normal_names else 1
+            tag = "正常" if label == 0 else "异常"
+            df = pd.DataFrame({'image_path': frames, 'label': [label] * len(frames)})
+            csv_path = os.path.join(self.root, 'test_frame', f'{vname}.csv')
+            df.to_csv(csv_path, index=False)
+            print(f"  [完成] {csv_path}: {len(df)} 帧, {tag}(label={label})")
+
+    def show_structure(self):
+        """打印当前数据集的目录结构和文件统计。"""
+        print(f"\n{'='*50}")
+        print(f"数据集: {self.data_name}")
+        print(f"根目录: {os.path.abspath(self.root)}")
+        print(f"{'='*50}")
+
+        for sub in ['train', 'test', 'test_frame', 'test_frame_description',
+                     'modified_test_frame_description']:
+            sub_path = os.path.join(self.root, sub)
+            if not os.path.isdir(sub_path):
+                print(f"  {sub}/  (不存在)")
+                continue
+
+            # 统计子目录和文件
+            subdirs = [d for d in os.listdir(sub_path) if os.path.isdir(os.path.join(sub_path, d))]
+            files = [f for f in os.listdir(sub_path) if os.path.isfile(os.path.join(sub_path, f))]
+
+            if subdirs:
+                total_frames = 0
+                for sd in sorted(subdirs):
+                    n = len(os.listdir(os.path.join(sub_path, sd)))
+                    total_frames += n
+                    print(f"  {sub}/{sd}/  ({n} 个文件)")
+                if len(subdirs) > 1:
+                    print(f"  {sub}/ 合计: {len(subdirs)} 个子目录, {total_frames} 个文件")
+            elif files:
+                print(f"  {sub}/  ({len(files)} 个文件: {', '.join(sorted(files)[:5])}{'...' if len(files)>5 else ''})")
+            else:
+                print(f"  {sub}/  (空)")
+
+        # 检查关键文件
+        for f in ['train.csv']:
+            fpath = os.path.join(self.root, f)
+            if os.path.isfile(fpath):
+                n = len(pd.read_csv(fpath))
+                print(f"  {f}  ({n} 条记录)")
+            else:
+                print(f"  {f}  (未生成)")
+
+        print(f"{'='*50}\n")
 
 class UBNormal_VideoOrganizer:
     '''

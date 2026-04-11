@@ -20,39 +20,45 @@ def cluster_kmeans(sentences, num_clusters=2):
     kmeans = KMeans(n_clusters=num_clusters, random_state=0).fit(X)
     return kmeans.cluster_centers_, kmeans.labels_
 
-def anomaly_keywords(rule_path = 'rule/rule_SHTech.txt', regenerate_keyword = False):
+def extract_keywords_from_rules(rule_path):
+    """从规则文件的 Anomaly 部分自动提取关键词，不依赖 GPT API。"""
+    stopwords = {'a', 'an', 'the', 'or', 'and', 'of', 'on', 'in', 'to', 'with',
+                 'such', 'as', 'is', 'are', 'any', 'not', 'for', 'at', 'by',
+                 'from', 'that', 'being', 'another', 'without', 'when', 'near',
+                 'into', 'person', 'items', 'objects', 'other', 'non'}
+    keywords = []
+    in_anomaly_section = False
+    with open(rule_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if 'Anomaly' in line and '**' in line:
+                in_anomaly_section = True
+                continue
+            if 'Normal' in line and '**' in line:
+                in_anomaly_section = False
+                continue
+            if in_anomaly_section and line:
+                # 去掉序号前缀
+                text = re.sub(r'^\d+\.\s*', '', line).lower()
+                words = re.findall(r'[a-z]+', text)
+                for w in words:
+                    if w not in stopwords and len(w) > 2 and w not in keywords:
+                        keywords.append(w)
+    return keywords
+
+
+def anomaly_keywords(rule_path='rule/rule_SHTech.txt', regenerate_keyword=False):
     '''
-    The below anomaly keywords are extracted and used for the experiment in the paper,
-    you can also extract from your rules with the below function.
+    Load or extract anomaly keywords from rules.
+    If .npy exists, load it; otherwise extract from rule file.
     '''
-    if regenerate_keyword == False:
-        anomaly_from_rule = [
-        "trolley",
-        "cart",
-        "luggage",
-        "bicycle",
-        "scooter",
-        "vehicles",
-        "vans",
-        "accident",
-        "running",
-        "jumping",
-        "riding",
-        "skateboarding",
-        "scooting",
-        "lying",
-        "falling",
-        "bending",
-        "fighting",
-        "pushing",
-        "loitering",
-        "climbing",
-        ]
-    else:
-        anomaly_from_rule = keyword_extract(rule_path)
-        print('Anomaly Keyword:', anomaly_from_rule)
     file_path = rule_path.replace('.txt', '.npy')
-    np.save(file_path, anomaly_from_rule)
+    if not regenerate_keyword and os.path.exists(file_path):
+        anomaly_from_rule = list(np.load(file_path, allow_pickle=True))
+    else:
+        anomaly_from_rule = extract_keywords_from_rules(rule_path)
+        print('Extracted anomaly keywords:', anomaly_from_rule)
+        np.save(file_path, anomaly_from_rule)
     return anomaly_from_rule
 
 
@@ -178,8 +184,7 @@ def evaluate(file_path, labels, output_file_path, save_modified,anomaly_from_rul
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='SHTech',
-                        choices=['SHTech', 'avenue', 'ped2', 'UBNormal'])
+    parser.add_argument('--data', type=str, default='SHTech')
     args = parser.parse_args()
     return args
 
@@ -192,10 +197,12 @@ def main():
     all_spreds = []
     all_scores = []
     all_ori_scores = []
-    if os.path.exists('rule/rule_SHTech.npy'):
-        anomaly_from_rule = np.load('rule/rule_SHTech.npy', allow_pickle=True)
+    rule_path = f'rule/rule_{data_name}.txt'
+    npy_path = f'rule/rule_{data_name}.npy'
+    if os.path.exists(npy_path):
+        anomaly_from_rule = np.load(npy_path, allow_pickle=True)
     else:
-        anomaly_from_rule = anomaly_keywords(rule_path='rule/rule_SHTech.txt')
+        anomaly_from_rule = anomaly_keywords(rule_path=rule_path)
     for item in entries:
         name = item.split('.')[0]
         input_file_path = f'{data_name}/test_frame_description/{name}.txt'  # Path to your input text file

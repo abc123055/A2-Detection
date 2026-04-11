@@ -1,0 +1,23 @@
+**Rules for Anomaly Human Activities:**
+1. Fighting, hitting, or pushing another person
+2. Aggressive body movements or physical altercation
+3. Running or chasing another person
+4. Falling or being knocked to the ground
+5. Grabbing or pulling another person forcefully
+
+**Rules for Anomaly Environmental Objects:**
+1. Objects being thrown or used as weapons
+2. Broken or damaged items on the ground
+3. Scattered personal belongings
+
+**Rules for Normal Human Activities:**
+1. Walking alone or with another person
+2. Standing still or waiting
+3. Sitting on a bench or chair
+4. Talking to another person calmly
+5. Carrying bags or personal items
+
+**Rules for Normal Environmental Objects:**
+1. Cars parked or driving on the street
+2. Trees, buildings, and street infrastructure
+3. Pedestrians walking on sidewalks

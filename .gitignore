@@ -1,3 +1,23 @@
 __pycache__/
 *.pyc
 .claude/
+
+# Data and results (generated at runtime)
+*/train/
+*/test/
+*/train.csv
+*/test.csv
+*/test_frame/
+*/test_frame_description/
+*/modified_test_frame_description/
+results/
+
+# Model cache
+*.bin
+*.safetensors
+
+# OS / IDE
+.DS_Store
+*.swp
+.vscode/
+.idea/
