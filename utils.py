@@ -9,9 +9,22 @@ import re
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
 import torch
 
-from modelscope.pipelines import pipeline as ms_pipeline
 device = 0 if torch.cuda.is_available() else -1
-classifier = ms_pipeline("zero-shot-classification", model="AI-ModelScope/bart-large-mnli", device = 0)
+_classifier = None
+
+def get_classifier():
+    """延迟加载 BART 分类器，仅在推理阶段需要时才加载。"""
+    global _classifier
+    if _classifier is None:
+        from modelscope.pipelines import pipeline as ms_pipeline
+        bart_path = os.path.join(os.path.dirname(__file__), "bart-large-mnli")
+        if os.path.isdir(bart_path):
+            print(f"Loading BART classifier from {bart_path}...")
+            _classifier = ms_pipeline("zero-shot-classification", model=bart_path, device=device)
+        else:
+            print("Loading BART classifier from AI-ModelScope/bart-large-mnli...")
+            _classifier = ms_pipeline("zero-shot-classification", model="AI-ModelScope/bart-large-mnli", device=device)
+    return _classifier
 
 np.random.seed(2024)
 
@@ -190,7 +203,7 @@ def post_process(text):
     # Extract the last sentence from the text
     sentences = text.split('\n')
     last_sentence = sentences[-2] if sentences[-1] == '' else sentences[-1]
-    result = classifier(last_sentence, candidate_labels=["normal", "anomaly"])
+    result = get_classifier()(last_sentence, candidate_labels=["normal", "anomaly"])
     if result['labels'][0] in ['anomaly', 'anomalous']:
         return 1  # Anomaly detected
     else:
