@@ -2,14 +2,13 @@ from llm import *
 from utils import *
 # from image2text import cogvlm
 import argparse
-from modelscope import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import warnings
 warnings.filterwarnings("ignore")
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='SHTech',
-                        choices=['SHTech', 'avenue', 'ped2', 'UBNormal'])
+    parser.add_argument('--data', type=str, default='SHTech')
     parser.add_argument('--induct', action='store_true')
     parser.add_argument('--deduct', action='store_true')
     parser.add_argument('--gpt_deduct_demo', action='store_true')
@@ -22,7 +21,7 @@ def parse_arguments():
 def main():
     args = parse_arguments()
     data_name = args.data
-    data_full_name = {'SHTech':'ShanghaiTech', 'avenue':'CUHK Avenue' , 'ped2': 'UCSD Ped2', 'UBNormal': 'UBNormal'}[data_name]
+    data_full_name = {'SHTech':'ShanghaiTech', 'avenue':'CUHK Avenue' , 'ped2': 'UCSD Ped2', 'UBNormal': 'UBNormal'}.get(data_name, data_name)
     print(args)
 
     if args.induct:
@@ -59,7 +58,8 @@ def main():
 
     if args.deduct:
         ## Deduction
-        model_id = "AI-ModelScope/Mistral-7B-Instruct-v0.2"
+        model_id = os.path.join(os.path.dirname(__file__), "Qwen")
+        print(f"Loading LLM from {model_id}...")
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         llm_model = AutoModelForCausalLM.from_pretrained(model_id, low_cpu_mem_usage=True, torch_dtype=torch.float16,
                                                      device_map='auto').eval()

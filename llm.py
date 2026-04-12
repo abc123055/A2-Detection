@@ -1,5 +1,5 @@
 # Load model directly
-from modelscope import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 from utils import *
 from collections import Counter
@@ -116,7 +116,7 @@ def mixtral_deduct(data, desc_path, rule_path, tokenizer, model, labels):
                     Fourth, describe how likely it is that your best answer is correct as one of the following expressions: ${EXPRESSION_LIST}. \nConfidence: <description of confidence, without any extra commentary whatsoever; just a short phrase!>\n\n
                     Now you are given the scene {obj}, think step by step.'''
         inputs = tokenizer(text, return_tensors="pt").to(device)
-        outputs = model.generate(**inputs, max_new_tokens=4000)
+        outputs = model.generate(**inputs, max_new_tokens=512, do_sample=False)
         answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
         print_out = str(obj)+find_text_after(answer, 'think step by step.')
         pred = post_process(print_out)
@@ -185,7 +185,7 @@ def mixtral_double_deduct(data, desc_path, rule_path, tokenizer, model, labels):
                         Now you are given the scene {obj}, think step by step.'''
 
         inputs = tokenizer(text, return_tensors="pt").to(device)
-        outputs = model.generate(**inputs, max_new_tokens=4000)
+        outputs = model.generate(**inputs, max_new_tokens=512, do_sample=False)
         answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
         print_out = str(obj)+find_text_after(answer, 'think step by step.')
         pred = 1 if ini_pred[0] == 1 else post_process(print_out)

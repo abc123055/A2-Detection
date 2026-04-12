@@ -12,7 +12,12 @@ __pycache__/
 */modified_test_frame_description/
 results/
 
-# Model cache
+# Model directories (download locally, do not commit)
+Qwen/
+bart-large-mnli/
+blip-image-captioning-base/
+cogvlm-chat/
+vicuna-7b-v1.5/
 *.bin
 *.safetensors
 
