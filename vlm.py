@@ -2,18 +2,13 @@
 VLM (Vision Language Model) module for generating frame-level scene descriptions.
 
 Supports multiple backends:
-  - CogVLM: High quality descriptions (~15GB VRAM), best for action/activity recognition
-  - BLIP:   Lightweight alternative (~1.5GB VRAM fp16), better for scene/object description
+  - qwen2vl: Qwen2.5-VL-32B (~35GB VRAM fp16), best quality
+  - cogvlm:  CogVLM (~15GB VRAM bfloat16), good for actions
+  - blip:    BLIP-base (~1GB VRAM fp16), lightweight
 
 Usage:
-    from vlm import describe_frames
-
-    # Auto-select based on available VRAM (default)
-    descriptions = describe_frames(frame_paths, output_path)
-
-    # Force a specific backend
-    descriptions = describe_frames(frame_paths, output_path, backend="blip")
-    descriptions = describe_frames(frame_paths, output_path, backend="cogvlm")
+    python vlm.py --data Mydataset
+    python vlm.py --data Mydataset --backend qwen2vl
 """
 
 import os
@@ -32,22 +27,52 @@ def _get_free_vram_gb():
     return free / (1024 ** 3)
 
 
-def _describe_blip(frame_paths, prompt="a surveillance camera image showing", batch_size=4):
-    """Generate descriptions using BLIP-large (~1.5GB VRAM in fp16).
+# ──────────────────────── Model Loading ────────────────────────
 
-    Good for: scene/object-level description, low VRAM environments.
-    Weak at: describing human actions, subtle motion, domain-specific objects.
-    """
+def _load_blip():
     from transformers import BlipProcessor, BlipForConditionalGeneration
-
     blip_path = os.path.join(os.path.dirname(__file__), "blip-image-captioning-base")
     print(f"Loading BLIP model from {blip_path}...")
     processor = BlipProcessor.from_pretrained(blip_path)
     model = BlipForConditionalGeneration.from_pretrained(
-        blip_path,
-        torch_dtype=torch.float16
+        blip_path, torch_dtype=torch.float16
     ).to(device).eval()
+    return model, processor
 
+
+def _load_cogvlm():
+    from modelscope import AutoModelForCausalLM, AutoTokenizer
+    cogvlm_path = os.path.join(os.path.dirname(__file__), "cogvlm-chat")
+    vicuna_path = os.path.join(os.path.dirname(__file__), "vicuna-7b-v1.5")
+    print(f"Loading CogVLM model from {cogvlm_path}...")
+    tokenizer = AutoTokenizer.from_pretrained(vicuna_path)
+    model = AutoModelForCausalLM.from_pretrained(
+        cogvlm_path, torch_dtype=torch.bfloat16,
+        low_cpu_mem_usage=True, trust_remote_code=True
+    ).to(device).eval()
+    return model, tokenizer
+
+
+def _load_qwen2vl():
+    from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+    qwen2vl_path = os.path.join(os.path.dirname(__file__), "Qwen2.5-VL-32B-Instruct")
+    print(f"Loading Qwen2.5-VL model from {qwen2vl_path}...")
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        qwen2vl_path, torch_dtype=torch.float16, device_map="auto",
+    ).eval()
+    processor = AutoProcessor.from_pretrained(qwen2vl_path)
+    return model, processor
+
+
+def _unload(model, processor_or_tokenizer):
+    del model, processor_or_tokenizer
+    torch.cuda.empty_cache()
+
+
+# ──────────────────────── Inference ────────────────────────
+
+def _describe_blip(frame_paths, model, processor, prompt=None, batch_size=4):
+    prompt = prompt or "a photo of"
     descriptions = []
     for i in range(0, len(frame_paths), batch_size):
         batch = frame_paths[i:i + batch_size]
@@ -68,30 +93,11 @@ def _describe_blip(frame_paths, prompt="a surveillance camera image showing", ba
         if (i // batch_size) % 10 == 0 or done == len(frame_paths):
             print(f"  [{done}/{len(frame_paths)}] {captions[-1][:80]}...")
 
-    del model, processor
-    torch.cuda.empty_cache()
     return descriptions
 
 
-def _describe_cogvlm(frame_paths, prompt="Describe this image in detail."):
-    """Generate descriptions using CogVLM (~15GB VRAM in bfloat16).
-
-    Good for: detailed scene understanding, action recognition, object relationships.
-    Requires: large VRAM (16GB+).
-    """
-    from modelscope import AutoModelForCausalLM, AutoTokenizer
-
-    cogvlm_path = os.path.join(os.path.dirname(__file__), "cogvlm-chat")
-    vicuna_path = os.path.join(os.path.dirname(__file__), "vicuna-7b-v1.5")
-    print(f"Loading CogVLM model from {cogvlm_path}...")
-    tokenizer = AutoTokenizer.from_pretrained(vicuna_path)
-    model = AutoModelForCausalLM.from_pretrained(
-        cogvlm_path,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True
-    ).to(device).eval()
-
+def _describe_cogvlm(frame_paths, model, tokenizer, prompt=None):
+    prompt = prompt or "Describe this image in detail."
     descriptions = []
     for idx, path in enumerate(frame_paths):
         image = Image.open(path).convert("RGB")
@@ -105,12 +111,9 @@ def _describe_cogvlm(frame_paths, prompt="Describe this image in detail."):
 
         with torch.no_grad():
             outputs = model.generate(
-                input_ids=input_ids,
-                token_type_ids=token_type_ids,
-                attention_mask=attention_mask,
-                images=images_tensor,
-                max_new_tokens=512,
-                do_sample=False,
+                input_ids=input_ids, token_type_ids=token_type_ids,
+                attention_mask=attention_mask, images=images_tensor,
+                max_new_tokens=512, do_sample=False,
             )
         resp = tokenizer.decode(outputs[0][input_ids.shape[1]:], skip_special_tokens=True)
         descriptions.append(resp.strip())
@@ -118,29 +121,12 @@ def _describe_cogvlm(frame_paths, prompt="Describe this image in detail."):
         if idx % 10 == 0 or idx == len(frame_paths) - 1:
             print(f"  [{idx + 1}/{len(frame_paths)}] {resp[:80]}...")
 
-    del model, tokenizer
-    torch.cuda.empty_cache()
     return descriptions
 
 
-def _describe_qwen2vl(frame_paths, prompt="Describe this image in detail, including human activities and objects."):
-    """Generate descriptions using Qwen2.5-VL (~35GB VRAM for 32B fp16).
-
-    Good for: high quality scene understanding, action recognition, detailed descriptions.
-    Currently the best open-source VLM for its size.
-    """
-    from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+def _describe_qwen2vl(frame_paths, model, processor, prompt=None):
     from qwen_vl_utils import process_vision_info
-
-    qwen2vl_path = os.path.join(os.path.dirname(__file__), "Qwen2.5-VL-32B-Instruct")
-    print(f"Loading Qwen2.5-VL model from {qwen2vl_path}...")
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        qwen2vl_path,
-        torch_dtype=torch.float16,
-        device_map="auto",
-    ).eval()
-    processor = AutoProcessor.from_pretrained(qwen2vl_path)
-
+    prompt = prompt or "Describe this image in detail, including human activities and objects."
     descriptions = []
     for idx, path in enumerate(frame_paths):
         messages = [{"role": "user", "content": [
@@ -156,7 +142,6 @@ def _describe_qwen2vl(frame_paths, prompt="Describe this image in detail, includ
 
         with torch.no_grad():
             output_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
-        # 只取新生成的 token
         generated_ids = output_ids[0][inputs.input_ids.shape[1]:]
         desc = processor.decode(generated_ids, skip_special_tokens=True).strip()
         descriptions.append(desc)
@@ -164,19 +149,40 @@ def _describe_qwen2vl(frame_paths, prompt="Describe this image in detail, includ
         if idx % 10 == 0 or idx == len(frame_paths) - 1:
             print(f"  [{idx + 1}/{len(frame_paths)}] {desc[:80]}...")
 
-    del model, processor
-    torch.cuda.empty_cache()
     return descriptions
 
 
-def describe_frames(frame_paths, output_path, backend="auto", prompt=None):
+# ──────────────────────── Public API ────────────────────────
+
+BACKENDS = {
+    'blip':    {'load': _load_blip,    'describe': _describe_blip},
+    'cogvlm':  {'load': _load_cogvlm,  'describe': _describe_cogvlm},
+    'qwen2vl': {'load': _load_qwen2vl, 'describe': _describe_qwen2vl},
+}
+
+
+def select_backend():
+    """根据可用显存自动选择后端。"""
+    vram = _get_free_vram_gb()
+    if vram >= 35:
+        name = "qwen2vl"
+    elif vram >= 16:
+        name = "cogvlm"
+    else:
+        name = "blip"
+    print(f"Auto-selected {name} (available VRAM: {vram:.1f}GB)")
+    return name
+
+
+def describe_frames(frame_paths, output_path, backend="auto", prompt=None, model_pair=None):
     """Generate text descriptions for a list of frame images.
 
     Args:
         frame_paths: List of image file paths.
         output_path: Where to save descriptions (one per line).
-        backend: "auto" (select by VRAM), "blip", or "cogvlm".
+        backend: "auto", "blip", "cogvlm", or "qwen2vl".
         prompt: Custom prompt. If None, uses backend default.
+        model_pair: (model, processor/tokenizer) tuple. If provided, reuse instead of loading.
 
     Returns:
         List of description strings.
@@ -189,28 +195,24 @@ def describe_frames(frame_paths, output_path, backend="auto", prompt=None):
             print(f"Descriptions already exist at {output_path} ({len(existing)} lines)")
             return [l.strip() for l in existing]
 
-    # Auto-select backend
     if backend == "auto":
-        vram = _get_free_vram_gb()
-        if vram >= 35:
-            backend = "qwen2vl"
-            print(f"Auto-selected Qwen2.5-VL (available VRAM: {vram:.1f}GB)")
-        elif vram >= 16:
-            backend = "cogvlm"
-            print(f"Auto-selected CogVLM (available VRAM: {vram:.1f}GB)")
-        else:
-            backend = "blip"
-            print(f"Auto-selected BLIP (available VRAM: {vram:.1f}GB)")
+        backend = select_backend()
 
-    # Generate descriptions
-    if backend == "blip":
-        descriptions = _describe_blip(frame_paths, prompt=prompt or "a photo of")
-    elif backend == "cogvlm":
-        descriptions = _describe_cogvlm(frame_paths, prompt=prompt or "Describe this image in detail.")
-    elif backend == "qwen2vl":
-        descriptions = _describe_qwen2vl(frame_paths, prompt=prompt or "Describe this image in detail, including human activities and objects.")
+    if backend not in BACKENDS:
+        raise ValueError(f"Unknown backend: {backend}. Use: {', '.join(BACKENDS.keys())}")
+
+    # 加载或复用模型
+    should_unload = False
+    if model_pair is None:
+        model, proc = BACKENDS[backend]['load']()
+        should_unload = True
     else:
-        raise ValueError(f"Unknown backend: {backend}. Use 'auto', 'blip', 'cogvlm', or 'qwen2vl'.")
+        model, proc = model_pair
+
+    descriptions = BACKENDS[backend]['describe'](frame_paths, model, proc, prompt=prompt)
+
+    if should_unload:
+        _unload(model, proc)
 
     # Save
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
@@ -223,19 +225,11 @@ def describe_frames(frame_paths, output_path, backend="auto", prompt=None):
 
 
 def describe_dataset(data_name, backend="auto", prompt=None):
-    """为数据集的所有测试视频生成帧描述。
-
-    自动扫描 {data_name}/test/ 下的所有视频目录，
-    为每个视频生成 {data_name}/test_frame_description/{video_name}.txt。
-
-    Args:
-        data_name: 数据集名称（如 'Mydataset'）
-        backend: "auto", "blip", 或 "cogvlm"
-        prompt: 自定义提示词，None 则用默认值
+    """为数据集的所有测试视频生成帧描述。模型只加载一次。
 
     用法:
         python vlm.py --data Mydataset
-        python vlm.py --data Mydataset --backend blip
+        python vlm.py --data Mydataset --backend qwen2vl
     """
     from glob import glob
 
@@ -252,13 +246,20 @@ def describe_dataset(data_name, backend="auto", prompt=None):
         print(f"[错误] {test_dir} 下没有视频目录")
         return
 
+    if backend == "auto":
+        backend = select_backend()
+
+    # 加载一次模型，处理所有视频
     print(f"共 {len(video_dirs)} 个测试视频待处理")
+    model, proc = BACKENDS[backend]['load']()
+
     for i, vname in enumerate(video_dirs):
         frames = sorted(glob(os.path.join(test_dir, vname, '*.jpg')))
         output_path = os.path.join(desc_dir, f'{vname}.txt')
         print(f"\n[{i+1}/{len(video_dirs)}] {vname}: {len(frames)} 帧")
-        describe_frames(frames, output_path, backend=backend, prompt=prompt)
+        describe_frames(frames, output_path, backend=backend, prompt=prompt, model_pair=(model, proc))
 
+    _unload(model, proc)
     print(f"\n全部完成，描述文件保存在 {desc_dir}/")
 
 
