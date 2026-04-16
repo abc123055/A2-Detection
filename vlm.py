@@ -2,7 +2,8 @@
 VLM (Vision Language Model) module for generating frame-level scene descriptions.
 
 Supports multiple backends:
-  - qwen2vl: Qwen2.5-VL-32B (~35GB VRAM fp16), best quality
+  - qwen35:  Qwen3.5-35B-A3B (~35GB VRAM, 3B active MoE), latest and best
+  - qwen2vl: Qwen2.5-VL-32B (~35GB VRAM fp16), strong general VLM
   - cogvlm:  CogVLM (~15GB VRAM bfloat16), good for actions
   - blip:    BLIP-base (~1GB VRAM fp16), lightweight
 
@@ -61,6 +62,17 @@ def _load_qwen2vl():
         qwen2vl_path, torch_dtype=torch.float16, device_map="auto",
     ).eval()
     processor = AutoProcessor.from_pretrained(qwen2vl_path)
+    return model, processor
+
+
+def _load_qwen35():
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+    qwen35_path = os.path.join(os.path.dirname(__file__), "Qwen3.5-35B-A3B")
+    print(f"Loading Qwen3.5-35B-A3B model from {qwen35_path}...")
+    model = AutoModelForImageTextToText.from_pretrained(
+        qwen35_path, torch_dtype="auto", device_map="auto",
+    ).eval()
+    processor = AutoProcessor.from_pretrained(qwen35_path)
     return model, processor
 
 
@@ -152,12 +164,39 @@ def _describe_qwen2vl(frame_paths, model, processor, prompt=None):
     return descriptions
 
 
+def _describe_qwen35(frame_paths, model, processor, prompt=None):
+    prompt = prompt or "Describe this image in detail, including human activities and objects."
+    descriptions = []
+    for idx, path in enumerate(frame_paths):
+        image = Image.open(path).convert("RGB")
+        messages = [{"role": "user", "content": [
+            {"type": "image", "image": image},
+            {"type": "text", "text": prompt},
+        ]}]
+        inputs = processor.apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=True,
+            return_dict=True, return_tensors="pt",
+        ).to(model.device)
+
+        with torch.no_grad():
+            output_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
+        generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+        desc = processor.decode(generated_ids, skip_special_tokens=True).strip()
+        descriptions.append(desc)
+
+        if idx % 10 == 0 or idx == len(frame_paths) - 1:
+            print(f"  [{idx + 1}/{len(frame_paths)}] {desc[:80]}...")
+
+    return descriptions
+
+
 # ──────────────────────── Public API ────────────────────────
 
 BACKENDS = {
     'blip':    {'load': _load_blip,    'describe': _describe_blip},
     'cogvlm':  {'load': _load_cogvlm,  'describe': _describe_cogvlm},
     'qwen2vl': {'load': _load_qwen2vl, 'describe': _describe_qwen2vl},
+    'qwen35':  {'load': _load_qwen35,  'describe': _describe_qwen35},
 }
 
 
@@ -165,6 +204,8 @@ def select_backend():
     """根据可用显存自动选择后端。"""
     vram = _get_free_vram_gb()
     if vram >= 35:
+        name = "qwen35"
+    elif vram >= 20:
         name = "qwen2vl"
     elif vram >= 16:
         name = "cogvlm"
@@ -268,7 +309,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='为测试集生成帧描述')
     parser.add_argument('--data', type=str, required=True, help='数据集名称')
     parser.add_argument('--backend', type=str, default='auto',
-                        choices=['auto', 'blip', 'cogvlm', 'qwen2vl'])
+                        choices=['auto', 'blip', 'cogvlm', 'qwen2vl', 'qwen35'])
     parser.add_argument('--prompt', type=str, default=None, help='自定义提示词')
     args = parser.parse_args()
     describe_dataset(args.data, backend=args.backend, prompt=args.prompt)
