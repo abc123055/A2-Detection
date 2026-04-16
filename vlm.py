@@ -123,6 +123,52 @@ def _describe_cogvlm(frame_paths, prompt="Describe this image in detail."):
     return descriptions
 
 
+def _describe_qwen2vl(frame_paths, prompt="Describe this image in detail, including human activities and objects."):
+    """Generate descriptions using Qwen2.5-VL (~35GB VRAM for 32B fp16).
+
+    Good for: high quality scene understanding, action recognition, detailed descriptions.
+    Currently the best open-source VLM for its size.
+    """
+    from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+    from qwen_vl_utils import process_vision_info
+
+    qwen2vl_path = os.path.join(os.path.dirname(__file__), "Qwen2.5-VL-32B-Instruct")
+    print(f"Loading Qwen2.5-VL model from {qwen2vl_path}...")
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        qwen2vl_path,
+        torch_dtype=torch.float16,
+        device_map="auto",
+    ).eval()
+    processor = AutoProcessor.from_pretrained(qwen2vl_path)
+
+    descriptions = []
+    for idx, path in enumerate(frame_paths):
+        messages = [{"role": "user", "content": [
+            {"type": "image", "image": f"file://{os.path.abspath(path)}"},
+            {"type": "text", "text": prompt},
+        ]}]
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = processor(
+            text=[text], images=image_inputs, videos=video_inputs,
+            return_tensors="pt", padding=True,
+        ).to(model.device)
+
+        with torch.no_grad():
+            output_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
+        # 只取新生成的 token
+        generated_ids = output_ids[0][inputs.input_ids.shape[1]:]
+        desc = processor.decode(generated_ids, skip_special_tokens=True).strip()
+        descriptions.append(desc)
+
+        if idx % 10 == 0 or idx == len(frame_paths) - 1:
+            print(f"  [{idx + 1}/{len(frame_paths)}] {desc[:80]}...")
+
+    del model, processor
+    torch.cuda.empty_cache()
+    return descriptions
+
+
 def describe_frames(frame_paths, output_path, backend="auto", prompt=None):
     """Generate text descriptions for a list of frame images.
 
@@ -146,20 +192,25 @@ def describe_frames(frame_paths, output_path, backend="auto", prompt=None):
     # Auto-select backend
     if backend == "auto":
         vram = _get_free_vram_gb()
-        if vram >= 16:
+        if vram >= 35:
+            backend = "qwen2vl"
+            print(f"Auto-selected Qwen2.5-VL (available VRAM: {vram:.1f}GB)")
+        elif vram >= 16:
             backend = "cogvlm"
             print(f"Auto-selected CogVLM (available VRAM: {vram:.1f}GB)")
         else:
             backend = "blip"
-            print(f"Auto-selected BLIP (available VRAM: {vram:.1f}GB, need 16GB+ for CogVLM)")
+            print(f"Auto-selected BLIP (available VRAM: {vram:.1f}GB)")
 
     # Generate descriptions
     if backend == "blip":
         descriptions = _describe_blip(frame_paths, prompt=prompt or "a photo of")
     elif backend == "cogvlm":
         descriptions = _describe_cogvlm(frame_paths, prompt=prompt or "Describe this image in detail.")
+    elif backend == "qwen2vl":
+        descriptions = _describe_qwen2vl(frame_paths, prompt=prompt or "Describe this image in detail, including human activities and objects.")
     else:
-        raise ValueError(f"Unknown backend: {backend}. Use 'auto', 'blip', or 'cogvlm'.")
+        raise ValueError(f"Unknown backend: {backend}. Use 'auto', 'blip', 'cogvlm', or 'qwen2vl'.")
 
     # Save
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
@@ -216,7 +267,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='为测试集生成帧描述')
     parser.add_argument('--data', type=str, required=True, help='数据集名称')
     parser.add_argument('--backend', type=str, default='auto',
-                        choices=['auto', 'blip', 'cogvlm'])
+                        choices=['auto', 'blip', 'cogvlm', 'qwen2vl'])
     parser.add_argument('--prompt', type=str, default=None, help='自定义提示词')
     args = parser.parse_args()
     describe_dataset(args.data, backend=args.backend, prompt=args.prompt)
